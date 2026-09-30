@@ -97,41 +97,39 @@ identity was a `u64` that client/server code round-tripped through a fake IPv6
 `on_new_message`'s signature (`Option<Vec<u8>>` vs `Uint8Array` with no close path) —
 this was never a working, coherent contract, just an in-progress prototype.
 
-**The current, real contract lives in `@mugon/sdk` (vendored at `./mugon-sdk-js`,
-copied in by the user from the live source, v0.0.1).** It is a materially different
+**The current, real contract lives in `@mugon/sdk` (`libraries/mugon-sdk-js` in the Mugon
+monorepo; SDK major 0, updated 2026-09-29 — the earlier `window.setupParentFrameCommunication`
+API described in older notes here no longer exists).** It is a materially different
 and more capable design:
 
 - **Peer IDs are strings**, not `u64`. No more address-encoding hack needed for
   identity.
 - Communication with the platform is **not** direct synchronous `window.*` calls into
-  a global relay — it's `postMessage`/`MessageChannel` based. The game's wasm runs
-  inside a sandboxed `<iframe>` ("gameframe"); the embedding page ("parentframe", the
-  actual Mugon platform code) hands the gameframe one end of a `MessageChannel` on
-  load and bridges it to a `ParentframeTransport` (backed by a dev-CLI local relay or
+  a global relay — it's `postMessage`/`MessageChannel` based. The game runs inside a
+  sandboxed `<iframe>` ("gameframe"); the embedding page ("parentframe", the actual Mugon
+  platform code) bridges it to a `ParentframeTransport` (backed by a dev-CLI local relay or
   the real production transport — the parentframe doesn't care which).
-- `mugon-sdk-js/src/gameframe.ts` is what actually runs inside the same JS realm as
-  our wasm build and is what our `wasm-bindgen` externs must target (it self-installs
-  onto `window` via `injectClientApiIntoWindowObject()`):
-  - `window.setupParentFrameCommunication(onReadyMsg?, onConnectMsg?, onDisconnectMsg?, onDataMsg?, onSettingsMsg?)`
-    — registers callbacks once; internally waits for the parentframe's `{type:"init"}`
-    postMessage carrying the `MessagePort`, then replies `{type:"rdy", protocol}`.
-  - `window.sendDataMessage(id: string, data: Uint8Array, channel?: Channel)` —
-    `channel` defaults to `ReliableOrdered`.
-  - `window.disconnect(id: string)` — tells the parentframe to drop a peer.
-  - `window.getSettingValue(key)` — reads `"mugon.networkmode"` (`"server" | "client"`),
-    `"mugon.serverid"`, `"mugon.clientid"` once the `"set"` message has been received.
-    This is how a single build knows whether it's the host or a client, and what its
-    own/the server's id is — there's no separate server vs. client SDK entry point.
-  - `window.startCanvasManager()` — unrelated to networking (canvas resize), ignore.
+- The game's shell page loads the SDK first and starts everything from inside
+  `Mugon.start(async ctx => { ... })`. The child says hello, the parentframe hands over its
+  ports once the network is up, and only then does the callback run — so **role and ids are
+  known synchronously, there is no settings/handshake phase to wait for.** `Mugon.start`
+  also publishes the (frozen) context as `window.mugon` before the callback, which is how the
+  wasm reads it: `mugon-sdk-bevy`'s `bindings.rs` mirrors `MugonContext`:
+  - `role` (`"server" | "client"`), `ownId`, `serverId` (equals `ownId` on the server),
+    `peers` (snapshot at init; for a client it always contains the server), `settings`.
+  - `ctx.send(peerId, data, channel?)`, `ctx.drop(peerId)`, `ctx.on("connect" | "disconnect" |
+    "message", handler)` (events that arrive before the first handler are queued and replayed),
+    `ctx.showInvite()`, `ctx.toggleFullscreen()`.
+  - `ctx.progress.set(fraction, label?)` / `ctx.progress.done()` for the platform's loading
+    overlay. The overlay also closes when the `Mugon.start` callback finishes, so a wasm shell
+    keeps that callback pending (`await new Promise(() => {})` after `init()`) and lets the game
+    call `done()` (`Bridge::loaded`, or `MugonLoadingPlugin`) once it is playable.
 - **`Channel` is a first-class part of the wire protocol**: every send/receive carries
   one of `ReliableOrdered | ReliableUnordered | UnreliableOrdered | UnreliableUnordered`
   (`mugon-sdk-js/src/protocol.ts`). One data channel per combination exists per peer↔
   server pair already, at the platform level.
-- Message shapes (`protocol.ts`): `con`/`dc` (connect/disconnect, carry `clientid`),
-  `msg` (carries `fromclientid`/`toclientid`, `channel`, `data: Uint8Array`), `set`
-  (settings dict), `rdy` (protocol handshake/version check).
-- Both "server" and "client" roles run the *same* gameframe code; role and identity
-  come from settings, not from which functions exist.
+- Both "server" and "client" roles run the *same* game code; role and identity
+  come from the context, not from which functions exist.
 
 **Practical conclusion: do not try to reuse the old fork's JS-facing Rust code.**
 Rewrite the bindings from scratch against `mugon-sdk-js`. The user has confirmed the
@@ -256,42 +254,44 @@ One server/host peer, many client peers. Matches `Endpoint`/`LinkOf` directly (h
 
 ## Crate shape (as built)
 
+The JS bridge (`Bridge`/`NetworkMode`, and the raw `wasm-bindgen` externs it's built on) used to
+live in this crate, but it isn't actually Lightyear-specific — it's the same bridge any Bevy
+game on the platform needs, with or without Lightyear. It now lives in `mugon-sdk-bevy` (this
+crate depends on that one, not the other way around — `mugon-sdk-bevy` has no Lightyear
+dependency at all), and this crate builds its transport on top of `mugon_sdk_bevy::Bridge`.
+
 ```
 crates/lightyear_mugon/
-  Cargo.toml            # lightyear_link, lightyear_connection, lightyear_raw_connection,
-                         # aeronet_io, wasm-bindgen, js-sys, bytes, tracing, thiserror
+  Cargo.toml            # lightyear, lightyear_link, lightyear_connection,
+                         # lightyear_raw_connection, aeronet_io, mugon-sdk-bevy (path dep),
+                         # tracing
   src/
-    lib.rs               # MugonPlugin: installs Bridge, both client/server transport
-                          # plugins, both lightyear_raw_connection plugins,
-                          # auto_spawn_role, and the StaleLink despawn safety net
-                          # (mark_stale_on_unlinked / despawn_stale_links)
-    bindings.rs           # wasm-bindgen externs matching mugon-sdk-js/src/gameframe.ts
-                          # 1:1 (setupParentFrameCommunication, sendDataMessage,
-                          # disconnect, getSettingValue); Channel enum (0-3)
-    bridge.rs             # Bridge: owns the 5 long-lived Closures + the Rc<RefCell<_>>
-                          # queues they feed (connects/disconnects/recv), plus the
-                          # settings/handshake accessors. NonSend resource (holds
-                          # Rc/Closure, not Send/Sync) — see its module docs for why
-                          # setupParentFrameCommunication is called exactly once.
-                          # take_connect() lets a consumer claim one specific queued
-                          # "con" without disturbing entries meant for someone else.
+    lib.rs               # MugonLightyearPlugin: adds mugon_sdk_bevy::MugonPlugin (JS bridge)
+                          # if not already present, Lightyear's ClientPlugins/ServerPlugins,
+                          # both of this crate's transport plugins, both
+                          # lightyear_raw_connection plugins, PredictionManager,
+                          # PeerConnected/PeerDisconnected (+ the observers that emit them
+                          # and wire up ReplicationSender/Receiver), auto_spawn_role, and the
+                          # StaleLink despawn safety net (mark_stale_on_unlinked /
+                          # despawn_stale_links)
     peer_addr.rs           # PeerAddrTable: sequential String<->SocketAddr bimap
                           # (decision #2) — has its own unit tests (reviewed by hand;
                           # not yet executed, see QUESTIONS.md)
-    client.rs             # MugonClientIo (+ RawClient): single Link to the one server
-                          # peer, settings-derived server_id, no fan-out. Waits for an
-                          # explicit "con" naming the server before marking Linked
-                          # (poll_connect) — see QUESTIONS.md #1.
-    server.rs             # MugonServerEndpoint (+ RawServer): Server + LinkOf child per
-                          # connected peer, PeerAddrTable-backed routing, spawns on
-                          # "con" / unlinks on "dc"
+    client.rs             # MugonClientIo (+ RawClient) and MugonLightyearClientPlugin:
+                          # single Link to the one server peer (Bridge::server_id), no
+                          # fan-out. Marked Linked on the frame after LinkStart
+                          # (complete_link): the context only exists once the server is
+                          # connected — see QUESTIONS.md #1.
+    server.rs             # MugonServerEndpoint (+ RawServer) and MugonLightyearServerPlugin:
+                          # Server + LinkOf child per connected peer, PeerAddrTable-backed
+                          # routing, spawns on "con" / unlinks on "dc"
 ```
 
 Send/receive systems mirror `crates/io/crossbeam/src/lib.rs`'s shape: `receive` drains
 `Bridge`'s queue into `Link::recv` inside `LinkReceiveSystems::BufferToLink`; `send` drains
 `Link::send`, copies each payload into a fresh `Uint8Array` (per the implementation note in
 decision #3 — never hand `postMessage` a view into Lightyear's buffer pool), and calls
-`Bridge::send` (→ `window.sendDataMessage` with `Channel::UnreliableUnordered`) inside
+`Bridge::send` (→ `ctx.send` with `Channel::UnreliableUnordered`) inside
 `LinkSystems::Send`. On the server side, routing is via `MugonServerEndpoint`'s
 `HashMap<String, Entity>` rather than iterating a `Server`/`Endpoint` relationship collection
 directly — see `server.rs`.

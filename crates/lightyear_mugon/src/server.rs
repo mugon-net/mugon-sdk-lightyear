@@ -1,7 +1,6 @@
 //! Server (host) side of the Mugon transport: one [`MugonServerEndpoint`] fanning out to one
 //! [`LinkOf`] child per connected client peer, mirroring `lightyear_udp`'s `UdpEndpoint`.
 
-use crate::bridge::Bridge;
 use crate::peer_addr::PeerAddrTable;
 use aeronet_io::connection::PeerAddr;
 use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
@@ -13,12 +12,13 @@ use lightyear_link::{
     UnlinkReason,
 };
 use lightyear_raw_connection::server::RawServer;
+use mugon_sdk_bevy::{Bridge, Channel};
 use std::collections::HashMap;
 use tracing::debug;
 
 /// Server-side Mugon transport component. Insert on the entity that should act as the host,
-/// spawn it, and trigger [`LinkStart`] on it (see `MugonPlugin` for the auto-spawn path this
-/// crate uses in the common case).
+/// spawn it, and trigger [`LinkStart`] on it (see `MugonLightyearPlugin` for the auto-spawn path
+/// this crate uses in the common case).
 ///
 /// Requires [`RawServer`] (decision #1): a `LinkOf` child reaching `Linked` implies `Connected`
 /// with no separate handshake.
@@ -47,9 +47,9 @@ impl MugonServerEndpoint {
 #[derive(Component)]
 pub struct MugonLinkOfIO;
 
-pub struct MugonServerPlugin;
+pub struct MugonLightyearServerPlugin;
 
-impl Plugin for MugonServerPlugin {
+impl Plugin for MugonLightyearServerPlugin {
     fn build(&self, app: &mut App) {
         if !app.is_plugin_added::<ServerLinkPlugin>() {
             app.add_plugins(ServerLinkPlugin);
@@ -186,7 +186,7 @@ fn send(
             continue;
         };
         for payload in link.send.drain() {
-            bridge.send(peer_id, payload.as_ref());
+            bridge.send(peer_id, payload.as_ref(), Channel::UnreliableUnordered);
         }
     }
 }

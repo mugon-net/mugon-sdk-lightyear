@@ -1,6 +1,9 @@
 [package]
 name = "lightyear_mugon"
 description = "Lightyear transport for games running on the Mugon platform"
+readme = "README.md"
+keywords = ["bevy", "lightyear", "multiplayer", "wasm", "mugon"]
+categories = ["game-development", "network-programming", "wasm"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,15 +16,13 @@ crate-type = ["cdylib", "rlib"]
 aeronet_io = "0.21.0"
 bevy_app = "0.19.1"
 bevy_ecs = "0.19.1"
-bytes = "1.12.1"
-js-sys = "0.3.105"
+lightyear = "0.30.1"
 lightyear_connection = "0.30.1"
 lightyear_core = "0.30.1"
 lightyear_link = "0.30.1"
 lightyear_raw_connection = { version = "0.30.1", features = ["client", "server"] }
-thiserror = "2.0.20"
+mugon-sdk-bevy = { path = "../../../mugon-sdk-bevy", version = "0.1.0" }
 tracing = "0.1.44"
-wasm-bindgen = "0.2.128"
 
 [target.wasm32-unknown-unknown.dependencies]
 getrandom = { version = "0.3.4", features = ["wasm_js"] }

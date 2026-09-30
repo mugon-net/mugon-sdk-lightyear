@@ -1,7 +1,6 @@
 //! Client side of the Mugon transport: exactly one [`Link`], to the platform's single server
 //! peer named at construction time.
 
-use crate::bridge::Bridge;
 use aeronet_io::connection::LocalAddr;
 use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
@@ -12,6 +11,7 @@ use lightyear_link::{
     Unlink, UnlinkReason,
 };
 use lightyear_raw_connection::client::RawClient;
+use mugon_sdk_bevy::{Bridge, Channel};
 
 /// A single link entity always uses this synthetic address for its one peer (the server).
 /// Safe to hardcode (rather than going through `PeerAddrTable`, which the server side needs to
@@ -31,7 +31,7 @@ pub struct MugonClientIo {
 
 impl MugonClientIo {
     /// `server_id` is the platform-assigned id of the (single) server peer, i.e.
-    /// `Bridge::server_id()` once settings have arrived.
+    /// `Bridge::server_id()`.
     pub fn new(server_id: impl Into<String>) -> Self {
         Self {
             server_id: server_id.into(),
@@ -39,15 +39,15 @@ impl MugonClientIo {
     }
 }
 
-pub struct MugonClientPlugin;
+pub struct MugonLightyearClientPlugin;
 
-impl Plugin for MugonClientPlugin {
+impl Plugin for MugonLightyearClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(link);
         app.add_observer(disconnect_server_on_local_unlink);
         app.add_systems(
             PreUpdate,
-            (poll_connect, poll_disconnect, receive)
+            (complete_link, poll_disconnect, receive)
                 .chain()
                 .in_set(LinkReceiveSystems::BufferToLink),
         );
@@ -55,23 +55,17 @@ impl Plugin for MugonClientPlugin {
     }
 }
 
-/// Marks the client entity `Linking` (attempting to connect) — confirmed with the platform:
-/// the client *does* receive an explicit `"con"` naming its server peer (not just settings +
-/// `"rdy"`, which this crate previously assumed was sufficient on its own). `poll_connect`
-/// finishes the transition to `Linked` once that `"con"` actually arrives.
+/// Marks the client entity `Linking` (attempting to connect). The platform only hands the game
+/// its context once the network is up, and a client's `ctx.peers` always contains its server
+/// (`mugon-sdk-js`'s `Parentframe` guarantees it), so `complete_link` can finish the
+/// transition to `Linked` on the next frame without waiting for anything.
 fn link(trigger: On<LinkStart>, query: Query<(), With<MugonClientIo>>, mut commands: Commands) {
     if query.get(trigger.entity).is_ok() {
         commands.entity(trigger.entity).insert(Linking);
     }
 }
 
-/// Finishes linking once the platform's `"con"` for this client's server peer arrives.
-///
-/// Uses [`Bridge::take_connect`] rather than [`Bridge::pop_connect`]: a `"con"` for the server
-/// can arrive before this entity even exists (the client's settings handshake — and therefore
-/// its `MugonClientIo` spawn — isn't guaranteed to happen first), so this must look for its own
-/// id specifically rather than draining the queue in FIFO order and risking discarding an
-/// unrelated entry while searching.
+/// Finishes linking a client entity that is `Linking`.
 ///
 /// Inserts [`LocalAddr`], not [`PeerAddr`](aeronet_io::connection::PeerAddr): despite the name
 /// suggesting "this entity's peer", `lightyear_raw_connection::client::RawConnectionPlugin`'s
@@ -80,17 +74,14 @@ fn link(trigger: On<LinkStart>, query: Query<(), With<MugonClientIo>>, mut comma
 /// `PeerAddr` at all. Inserting `PeerAddr` here (matching `server.rs`'s pattern, which *is*
 /// read by the server-side observer) left the query's `&LocalAddr` unsatisfied, so `Connected`
 /// was never added and `PeerConnected` never fired for the client.
-fn poll_connect(
-    bridge: bevy_ecs::system::NonSend<Bridge>,
-    query: Query<(Entity, &MugonClientIo), Without<Linked>>,
+fn complete_link(
+    query: Query<Entity, (With<MugonClientIo>, With<Linking>, Without<Linked>)>,
     mut commands: Commands,
 ) {
-    for (entity, client) in query.iter() {
-        if bridge.take_connect(&client.server_id) {
-            commands
-                .entity(entity)
-                .insert((Linked, LocalAddr(SERVER_ADDR)));
-        }
+    for entity in query.iter() {
+        commands
+            .entity(entity)
+            .insert((Linked, LocalAddr(SERVER_ADDR)));
     }
 }
 
@@ -151,6 +142,10 @@ fn send(
         return;
     };
     for payload in link.send.drain() {
-        bridge.send(&client.server_id, payload.as_ref());
+        bridge.send(
+            &client.server_id,
+            payload.as_ref(),
+            Channel::UnreliableUnordered,
+        );
     }
 }

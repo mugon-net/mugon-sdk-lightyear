@@ -1,11 +1,15 @@
 //! Lightyear transport for games running on the [Mugon](https://mugon.net) platform.
 //!
 //! See the repo README for the full design rationale (why this replaces
-//! `mugon-net/lightyear`'s fork, the decisions behind each piece here, and what's still
-//! open). In short: [`MugonPlugin`] registers this process's one-time JS bridge (see
-//! [`bridge`]), watches for the platform to report this process's role (`"server"` or
-//! `"client"`, via `mugon.networkmode` — settled at runtime, not compile time, since a single
-//! wasm build can run as either), and spawns the matching topology:
+//! `mugon-net/lightyear`'s fork, the decisions behind each piece here, and what's still open).
+//! In short: [`MugonLightyearPlugin`] wraps Lightyear's `ClientPlugins`/`ServerPlugins` together
+//! with this crate's own transport (built on `mugon_sdk_bevy::MugonPlugin`'s JS bridge to
+//! `mugon-sdk-js` — see that crate for the bridge's own design), reads this process's role
+//! (`"server"` or `"client"`, from the `MugonContext` the platform hands the game — settled at
+//! runtime, not compile time, since a single wasm build can run as either), spawns the matching
+//! topology, and surfaces peer connect/disconnect as plain Bevy events
+//! ([`PeerConnected`]/[`PeerDisconnected`]) so game code doesn't need to know anything about
+//! Lightyear's connection-lifecycle components to spawn/despawn per-player entities:
 //!
 //! - **Server**: one [`server::MugonServerEndpoint`] that fans out to one
 //!   [`lightyear_link::server::LinkOf`] child per connected client peer.
@@ -14,56 +18,170 @@
 //!
 //! Both pair with [`lightyear_raw_connection`] (decision #1 — Mugon already vets peer identity
 //! before the gameframe sees it, so no connect-token handshake is needed on top), added
-//! automatically by [`MugonPlugin`].
+//! automatically by [`MugonLightyearPlugin`].
+//!
+//! Deliberately POC-scoped (see `games/mario-kart-poc/PLAN.md`): this is only what that game
+//! needs, not a general-purpose SDK. `ClientPlugins`/`ServerPlugins` are always both installed,
+//! matching this crate's own decision to resolve client/server role at runtime rather than
+//! compile time (a single wasm build can be told by the platform to be either).
 
-mod bindings;
-mod bridge;
 pub mod client;
 mod peer_addr;
 pub mod server;
 
 use bevy_app::{App, Plugin, PreUpdate};
+use bevy_ecs::message::MessageWriter;
 use bevy_ecs::prelude::*;
 use core::time::Duration;
+use lightyear::prelude::*;
 use lightyear_core::time::Instant;
 use lightyear_link::{LinkPlugin, LinkStart, Linked, Unlinked};
-use tracing::error;
 
-pub use bridge::{Bridge, NetworkMode};
+pub use mugon_sdk_bevy::{Bridge, NetworkMode};
 
 pub mod prelude {
-    pub use crate::client::{MugonClientIo, MugonClientPlugin};
-    pub use crate::server::{MugonLinkOfIO, MugonServerEndpoint, MugonServerPlugin};
-    pub use crate::{Bridge, MugonPlugin, NetworkMode};
+    pub use crate::client::{MugonClientIo, MugonLightyearClientPlugin};
+    pub use crate::server::{MugonLightyearServerPlugin, MugonLinkOfIO, MugonServerEndpoint};
+    pub use crate::{Bridge, MugonLightyearPlugin, NetworkMode, PeerConnected, PeerDisconnected};
 }
 
-/// Installs the Mugon transport: the JS bridge, both client and server transport systems, the
-/// paired [`lightyear_raw_connection`] plugins, and the auto-spawn system that starts the
-/// right topology once the platform reports this process's role.
+/// Fired when a peer's Lightyear connection entity gets [`Connected`].
+///
+/// On the server this fires once per connected client (the `LinkOf` child entity); on the
+/// client it fires once, for its single connection to the server. `peer_id` is Lightyear's own
+/// identity for the link (a [`PeerId::Raw`] wrapping the synthetic `SocketAddr` `peer_addr`
+/// assigns per platform peer id) — sufficient for `ControlledBy`/`NetworkTarget::Single` and
+/// friends; the platform's own string peer id isn't exposed outside this crate today
+/// (`peer_addr` is private), which is fine since gameplay code only needs Lightyear-level
+/// identity.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerConnected {
+    pub entity: Entity,
+    pub peer_id: PeerId,
+}
+
+/// Fired when a peer's Lightyear connection entity gets [`Disconnected`]. See
+/// [`PeerConnected`] for what `peer_id` is.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeerDisconnected {
+    pub entity: Entity,
+    pub peer_id: PeerId,
+}
+
+/// Installs the Mugon transport: the JS bridge (via `mugon_sdk_bevy::MugonPlugin`), Lightyear's
+/// facade plugin groups, both client and server transport systems, the paired
+/// [`lightyear_raw_connection`] plugins, and the auto-spawn system that starts the right
+/// topology once the platform reports this process's role.
 ///
 /// Both client and server transport systems are always installed (regardless of which role
 /// this process turns out to have) because Mugon decides the role at runtime, not at compile
 /// time — see the module docs. This costs a little unused code in the other role's binary; see
 /// `QUESTIONS.md` for whether that should become a compile-time choice instead.
-pub struct MugonPlugin;
+///
+/// If the app also needs `mugon_sdk_bevy::MugonPlugin` directly (e.g. for `touch-controls`),
+/// add it *before* this plugin, or not at all — adding it afterwards panics (duplicate plugin).
+pub struct MugonLightyearPlugin;
 
-impl Plugin for MugonPlugin {
+impl Plugin for MugonLightyearPlugin {
     fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<mugon_sdk_bevy::MugonPlugin>() {
+            app.add_plugins(mugon_sdk_bevy::MugonPlugin);
+        }
+
+        // Facade plugin groups first, this crate's own transport plugins second -- confirmed
+        // live (Milestone 1 checkpoint) that the other order panics.
+        // `server::ServerPlugins`'s `PluginGroupBuilder` adds
+        // `lightyear_link::server::ServerLinkPlugin` unconditionally, with no
+        // `is_plugin_added` guard of its own (that check only happens once, when a plugin
+        // *group* is finished and applied to the `App`). `MugonLightyearServerPlugin` also wants
+        // `ServerLinkPlugin`, but guards its own add with `is_plugin_added`. Whichever side runs
+        // first "wins" the unguarded slot; the second side's guard (if it has one) then
+        // correctly no-ops. So `ServerPlugins`/`ClientPlugins` must go first, this crate's
+        // transport plugins second -- the reverse order panics at startup with "plugin was
+        // already added in application". Do not additionally enable the `lightyear` facade
+        // crate's `raw_connection`/`netcode` cargo features in this crate's Cargo.toml -- either
+        // one would make `ClientPlugins`/`ServerPlugins` try to add `RawConnectionPlugin` a
+        // second time (this crate adds it unconditionally below, with no guard at all), hitting
+        // the same failure mode.
+        app.add_plugins((
+            lightyear::prelude::client::ClientPlugins::default(),
+            lightyear::prelude::server::ServerPlugins::default(),
+        ));
+
         if !app.is_plugin_added::<LinkPlugin>() {
             app.add_plugins(LinkPlugin);
         }
-        app.add_plugins((client::MugonClientPlugin, server::MugonServerPlugin));
+        app.add_plugins((
+            client::MugonLightyearClientPlugin,
+            server::MugonLightyearServerPlugin,
+        ));
         app.add_plugins((
             lightyear_raw_connection::client::RawConnectionPlugin,
             lightyear_raw_connection::server::RawConnectionPlugin,
         ));
 
-        let bridge = Bridge::install();
-        app.insert_non_send(bridge);
+        // `lightyear_prediction::RollbackPlugin` (always installed by `ClientPlugins`'s default
+        // `prediction` feature) schedules `reset_input_rollback_tracker` unconditionally in
+        // `PreUpdate`, and that system takes a hard `ResMut<LastConfirmedInput>` -- but
+        // `LastConfirmedInput` is only initialized when a `PredictionManager` resource is
+        // inserted (`PredictionPlugin`'s `On<Insert, PredictionManager>` observer), which is
+        // opt-in and no Mugon game had opted into yet. Without it, that system panics with
+        // "Resource does not exist" on every tick, even with zero predicted entities. The actual
+        // prediction/rollback pipeline still stays dormant per-topology (`should_run` requires
+        // `NetworkTopology::Client`/`P2P`) and per-component (`PredictionTarget`), so inserting
+        // this unconditionally on both roles is safe -- it only prevents this crash.
+        app.insert_resource(PredictionManager::default());
+
+        app.add_message::<PeerConnected>();
+        app.add_message::<PeerDisconnected>();
+        app.add_observer(on_connected);
+        app.add_observer(on_disconnected);
 
         app.add_systems(PreUpdate, auto_spawn_role);
         app.add_observer(mark_stale_on_unlinked);
         app.add_systems(PreUpdate, despawn_stale_links);
+    }
+}
+
+/// Opts every connected link into replication and emits [`PeerConnected`].
+///
+/// Neither `ReplicationSender` (server-side, per connected client link) nor
+/// `ReplicationReceiver` (the client's own connection entity) are inserted automatically by
+/// Lightyear's replicon backend -- a link that lacks them stays connected (messages still flow)
+/// but never replicates entities. Every Mugon game wants replication on for every peer, so this
+/// is handled here once rather than in each game.
+fn on_connected(
+    trigger: On<Add, Connected>,
+    remote_ids: Query<&RemoteId>,
+    is_client_of: Query<(), With<lightyear::prelude::server::ClientOf>>,
+    is_client: Query<(), With<Client>>,
+    mut events: MessageWriter<PeerConnected>,
+    mut commands: Commands,
+) {
+    if is_client_of.get(trigger.entity).is_ok() {
+        commands.entity(trigger.entity).insert(ReplicationSender);
+    }
+    if is_client.get(trigger.entity).is_ok() {
+        commands.entity(trigger.entity).insert(ReplicationReceiver);
+    }
+    if let Ok(remote_id) = remote_ids.get(trigger.entity) {
+        events.write(PeerConnected {
+            entity: trigger.entity,
+            peer_id: remote_id.0,
+        });
+    }
+}
+
+fn on_disconnected(
+    trigger: On<Add, Disconnected>,
+    remote_ids: Query<&RemoteId>,
+    mut events: MessageWriter<PeerDisconnected>,
+) {
+    if let Ok(remote_id) = remote_ids.get(trigger.entity) {
+        events.write(PeerDisconnected {
+            entity: trigger.entity,
+            peer_id: remote_id.0,
+        });
     }
 }
 
@@ -125,11 +243,10 @@ fn despawn_stale_links(
     }
 }
 
-/// Waits for the platform's settings handshake, then spawns the matching topology exactly
-/// once.
+/// Spawns the topology matching this process's role exactly once, on the first frame.
 ///
 /// This is a deliberate ergonomics choice (spawn automatically rather than making the host
-/// app poll [`Bridge::network_mode`] itself and spawn manually) — flagged in `QUESTIONS.md` as
+/// app read [`Bridge::network_mode`] itself and spawn manually) — flagged in `QUESTIONS.md` as
 /// worth confirming, since it's the kind of API-shape decision that's easy to get attached to
 /// before the person actually using it has seen the alternative.
 fn auto_spawn_role(
@@ -137,30 +254,19 @@ fn auto_spawn_role(
     mut spawned: Local<bool>,
     mut commands: Commands,
 ) {
-    if *spawned || !bridge.settings_ready() {
+    if *spawned {
         return;
     }
     match bridge.network_mode() {
-        Some(NetworkMode::Server) => {
+        NetworkMode::Server => {
             let entity = commands.spawn(server::MugonServerEndpoint::new()).id();
             commands.trigger(LinkStart { entity });
         }
-        Some(NetworkMode::Client) => {
-            let Some(server_id) = bridge.server_id() else {
-                // Per protocol.rs / parentframe.ts this should never happen once settings_ready
-                // is true for a client (settings always carry mugon.serverid in that case) --
-                // wait another frame rather than treating it as fatal.
-                return;
-            };
-            let entity = commands.spawn(client::MugonClientIo::new(server_id)).id();
+        NetworkMode::Client => {
+            let entity = commands
+                .spawn(client::MugonClientIo::new(bridge.server_id()))
+                .id();
             commands.trigger(LinkStart { entity });
-        }
-        None => {
-            error!(
-                "Mugon settings arrived but mugon.networkmode was missing or unrecognized; \
-                 cannot start the transport"
-            );
-            return;
         }
     }
     *spawned = true;
