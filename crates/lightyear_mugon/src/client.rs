@@ -56,7 +56,7 @@ impl Plugin for MugonLightyearClientPlugin {
 }
 
 /// Marks the client entity `Linking` (attempting to connect). The platform only hands the game
-/// its context once the network is up, and a client's `ctx.peers` always contains its server
+/// its context once the network is up, and a client's `ctx.initialPeers` always contains its server
 /// (`mugon-sdk-js`'s `Parentframe` guarantees it), so `complete_link` can finish the
 /// transition to `Linked` on the next frame without waiting for anything.
 fn link(trigger: On<LinkStart>, query: Query<(), With<MugonClientIo>>, mut commands: Commands) {
