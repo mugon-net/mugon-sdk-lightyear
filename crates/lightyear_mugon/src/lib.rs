@@ -1,8 +1,6 @@
 //! Lightyear transport for games running on the [Mugon](https://mugon.net) platform.
 //!
-//! See the repo README for the full design rationale (why this replaces
-//! `mugon-net/lightyear`'s fork, the decisions behind each piece here, and what's still open).
-//! In short: [`MugonLightyearPlugin`] wraps Lightyear's `ClientPlugins`/`ServerPlugins` together
+//! [`MugonLightyearPlugin`] wraps Lightyear's `ClientPlugins`/`ServerPlugins` together
 //! with this crate's own transport (built on `mugon_sdk_bevy::MugonPlugin`'s JS bridge to
 //! `mugon-sdk-js` — see that crate for the bridge's own design), reads this process's role
 //! (`"server"` or `"client"`, from the `MugonContext` the platform hands the game — settled at
@@ -16,14 +14,12 @@
 //! - **Client**: one [`client::MugonClientIo`], the single [`lightyear_link::Link`] to the
 //!   platform's one server peer.
 //!
-//! Both pair with [`lightyear_raw_connection`] (decision #1 — Mugon already vets peer identity
+//! Both pair with [`lightyear_raw_connection`] (Mugon already vets peer identity
 //! before the gameframe sees it, so no connect-token handshake is needed on top), added
 //! automatically by [`MugonLightyearPlugin`].
 //!
-//! Deliberately POC-scoped (see `games/mario-kart-poc/PLAN.md`): this is only what that game
-//! needs, not a general-purpose SDK. `ClientPlugins`/`ServerPlugins` are always both installed,
-//! matching this crate's own decision to resolve client/server role at runtime rather than
-//! compile time (a single wasm build can be told by the platform to be either).
+//! Both the client and the server transport are always installed: the platform decides the role
+//! at runtime, and a single wasm build can run as either.
 
 pub mod client;
 mod peer_addr;
@@ -75,8 +71,7 @@ pub struct PeerDisconnected {
 ///
 /// Both client and server transport systems are always installed (regardless of which role
 /// this process turns out to have) because Mugon decides the role at runtime, not at compile
-/// time — see the module docs. This costs a little unused code in the other role's binary; see
-/// `QUESTIONS.md` for whether that should become a compile-time choice instead.
+/// time — see the module docs. This costs a little unused code in the other role's binary.
 ///
 /// If the app also needs `mugon_sdk_bevy::MugonPlugin` directly (e.g. for `touch-controls`),
 /// add it *before* this plugin, or not at all — adding it afterwards panics (duplicate plugin).
@@ -224,7 +219,7 @@ fn mark_stale_on_unlinked(
 /// Despawns any [`StaleLink`] entity whose grace period has elapsed.
 ///
 /// If the entity got re-`Linked` before then (e.g. the same Mugon peer reconnecting quickly —
-/// recall peer ids are never reused for a *different* peer, per `QUESTIONS.md` #2, so a fresh
+/// recall peer ids are never reused for a *different* peer, so a fresh
 /// `Linked` on this exact entity within the grace period is a legitimate fast reconnect, not a
 /// stale leftover), the [`StaleLink`] marker is simply removed instead.
 fn despawn_stale_links(
@@ -245,10 +240,9 @@ fn despawn_stale_links(
 
 /// Spawns the topology matching this process's role exactly once, on the first frame.
 ///
-/// This is a deliberate ergonomics choice (spawn automatically rather than making the host
-/// app read [`Bridge::network_mode`] itself and spawn manually) — flagged in `QUESTIONS.md` as
-/// worth confirming, since it's the kind of API-shape decision that's easy to get attached to
-/// before the person actually using it has seen the alternative.
+/// Spawning automatically, rather than making the app read [`Bridge::network_mode`] itself and
+/// spawn manually, keeps the role-dependent setup out of the game. An app that wants to control
+/// the topology itself can read the role from the bridge instead.
 fn auto_spawn_role(
     bridge: bevy_ecs::system::NonSend<Bridge>,
     mut spawned: Local<bool>,

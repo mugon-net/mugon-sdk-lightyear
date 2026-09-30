@@ -21,7 +21,7 @@ const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0,
 
 /// Client-side Mugon transport component.
 ///
-/// Requires [`RawClient`] (decision #1): `Linked` on this entity implies `Connected` with no
+/// Requires [`RawClient`]: `Linked` on this entity implies `Connected` with no
 /// separate handshake, since Mugon already vetted this peer before the gameframe saw it.
 #[derive(Component)]
 #[require(Link, RawClient = RawClient)]
@@ -65,6 +65,8 @@ fn link(trigger: On<LinkStart>, query: Query<(), With<MugonClientIo>>, mut comma
     }
 }
 
+type LinkingMugonClient = (With<MugonClientIo>, With<Linking>, Without<Linked>);
+
 /// Finishes linking a client entity that is `Linking`.
 ///
 /// Inserts [`LocalAddr`], not [`PeerAddr`](aeronet_io::connection::PeerAddr): despite the name
@@ -75,7 +77,7 @@ fn link(trigger: On<LinkStart>, query: Query<(), With<MugonClientIo>>, mut comma
 /// read by the server-side observer) left the query's `&LocalAddr` unsatisfied, so `Connected`
 /// was never added and `PeerConnected` never fired for the client.
 fn complete_link(
-    query: Query<Entity, (With<MugonClientIo>, With<Linking>, Without<Linked>)>,
+    query: Query<Entity, LinkingMugonClient>,
     mut commands: Commands,
 ) {
     for entity in query.iter() {

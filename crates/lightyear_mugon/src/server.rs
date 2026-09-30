@@ -20,15 +20,15 @@ use tracing::debug;
 /// spawn it, and trigger [`LinkStart`] on it (see `MugonLightyearPlugin` for the auto-spawn path
 /// this crate uses in the common case).
 ///
-/// Requires [`RawServer`] (decision #1): a `LinkOf` child reaching `Linked` implies `Connected`
+/// Requires [`RawServer`]: a `LinkOf` child reaching `Linked` implies `Connected`
 /// with no separate handshake.
 ///
-/// Note: `lightyear_link` 0.30.1 (the published version this crate depends on, per decision #4)
+/// Note: `lightyear_link` 0.30.1 (the published version this crate depends on)
 /// names this relationship-target component `Server`, with child links pointing back via
 /// `LinkOf { server: Entity }`. Unreleased upstream `main` has since renamed this to
 /// `Endpoint`/`LinkOf { endpoint: Entity }` (transport-neutral naming, since a P2P peer can also
-/// own child links without being a "server"). Update this crate's naming when that lands in a
-/// release — see `QUESTIONS.md`.
+/// own child links without being a "server"). This crate's naming follows once that lands in a
+/// release.
 #[derive(Component, Default)]
 #[require(Server, RawServer = RawServer)]
 pub struct MugonServerEndpoint {
@@ -80,13 +80,11 @@ fn link(
 /// disconnected one.
 ///
 /// Assumes exactly one [`MugonServerEndpoint`] per process, matching Mugon's star topology
-/// (decision #5 in the repo README — one host, many clients). See `QUESTIONS.md` if that ever
-/// needs to change.
+/// (one host, many clients).
 ///
 /// A repeated `"con"` for a peer id we already have an entity for is treated as idempotent
 /// (existing entity is simply marked `Linked` again), not a duplicate spawn — this crate
-/// doesn't yet know whether Mugon can ever re-announce a still-connected peer. See
-/// `QUESTIONS.md`.
+/// doesn't assume the platform never re-announces a still-connected peer.
 fn spawn_and_despawn_peers(
     bridge: bevy_ecs::system::NonSend<Bridge>,
     mut endpoints: Query<(Entity, &mut MugonServerEndpoint), With<Linked>>,

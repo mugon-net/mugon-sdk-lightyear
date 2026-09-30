@@ -36,11 +36,20 @@ role on the first frame. The wasm has to be started from inside the callback of 
 All traffic uses the platform's `UnreliableUnordered` channel: Lightyear brings its own
 reliability layer, so layering it over a reliable channel would only add head-of-line blocking.
 
-## Status
+## Compatibility
 
-Compiles against Lightyear 0.30.1 for `wasm32-unknown-unknown`. It has not yet been run
-end-to-end in a browser; see `QUESTIONS.md` in the repository for what is and isn't verified.
+| `lightyear_mugon` | Lightyear | Bevy | `mugon-sdk-bevy` |
+| --- | --- | --- | --- |
+| 0.1 | 0.30 | 0.19 | 0.1 |
+
+Target: `wasm32-unknown-unknown`.
 
 ## License
 
-Licensed under either of MIT or Apache-2.0, at your option.
+[MIT](LICENSE-MIT)
+
+## Links
+
+- Repository and issues: <https://github.com/mugon-net/mugon-sdk-lightyear>
+- Bevy SDK: <https://github.com/mugon-net/mugon-sdk-bevy>
+- Platform: <https://mugon.net>

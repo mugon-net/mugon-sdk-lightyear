@@ -1,6 +1,6 @@
 //! Synthetic `SocketAddr` surrogates for Mugon's string peer ids.
 //!
-//! See decision #2 in the repo README: `lightyear_raw_connection`'s `PeerId::Raw` variant
+//! `lightyear_raw_connection`'s `PeerId::Raw` variant
 //! (and `RawConnectionPlugin`'s `Query<(&LinkOf, &PeerAddr)>`) require a `SocketAddr` as the
 //! peer's identity. Mugon peer ids are strings, so this module assigns each one a stable,
 //! sequential loopback address for as long as it stays connected, purely to satisfy that

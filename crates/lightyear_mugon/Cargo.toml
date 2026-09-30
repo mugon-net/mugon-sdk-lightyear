@@ -1,9 +1,11 @@
 [package]
 name = "lightyear_mugon"
 description = "Lightyear transport for games running on the Mugon platform"
+homepage = "https://github.com/mugon-net/mugon-sdk-lightyear"
 readme = "README.md"
 keywords = ["bevy", "lightyear", "multiplayer", "wasm", "mugon"]
 categories = ["game-development", "network-programming", "wasm"]
+include = ["src/**/*", "README.md", "LICENSE-MIT", "Cargo.toml"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
