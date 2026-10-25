@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/lightyear_mugon"]
+members = ["crates/mugon-sdk-lightyear"]
 
 [workspace.package]
 version = "0.1.0"

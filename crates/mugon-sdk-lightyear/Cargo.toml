@@ -1,5 +1,5 @@
 [package]
-name = "lightyear_mugon"
+name = "mugon-sdk-lightyear"
 description = "Lightyear transport for games running on the Mugon platform"
 homepage = "https://github.com/mugon-net/mugon-sdk-lightyear"
 readme = "README.md"

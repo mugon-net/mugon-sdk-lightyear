@@ -1,4 +1,4 @@
-# lightyear_mugon
+# mugon-sdk-lightyear
 
 A [Lightyear](https://github.com/cBournhonesque/lightyear) transport for Bevy games running on
 the [mugon.net](https://mugon.net) platform (built on
@@ -12,7 +12,7 @@ crate pairs the transport with `lightyear_raw_connection` (no connect-token hand
 
 ```rust
 use bevy::prelude::*;
-use lightyear_mugon::prelude::*;
+use mugon_sdk_lightyear::prelude::*;
 
 fn main() {
     App::new()
@@ -38,7 +38,7 @@ reliability layer, so layering it over a reliable channel would only add head-of
 
 ## Compatibility
 
-| `lightyear_mugon` | Lightyear | Bevy | `mugon-sdk-bevy` |
+| `mugon-sdk-lightyear` | Lightyear | Bevy | `mugon-sdk-bevy` |
 | --- | --- | --- | --- |
 | 0.1 | 0.30 | 0.19 | 0.1 |
 

@@ -1,12 +1,12 @@
 # mugon-sdk-lightyear
 
 [Lightyear](https://github.com/cBournhonesque/lightyear) networking for Bevy games that run on
-the [mugon.net](https://mugon.net) platform. The `lightyear_mugon` crate is a Lightyear transport
+the [mugon.net](https://mugon.net) platform. The `mugon-sdk-lightyear` crate is a Lightyear transport
 on top of [`mugon-sdk-bevy`](https://github.com/mugon-net/mugon-sdk-bevy): the platform decides
 whether a process is the **server** (host) or a **client** and carries the traffic between peers,
 and Lightyear does replication, prediction and interpolation on top.
 
-| `lightyear_mugon` | Lightyear | Bevy | `mugon-sdk-bevy` |
+| `mugon-sdk-lightyear` | Lightyear | Bevy | `mugon-sdk-bevy` |
 | --- | --- | --- | --- |
 | 0.1 | 0.30 | 0.19 | 0.1 |
 
@@ -19,7 +19,7 @@ for `mugon-sdk-bevy`; add this crate to it:
 [dependencies]
 bevy = "0.19"
 lightyear = "0.30"
-lightyear_mugon = "0.1"
+mugon-sdk-lightyear = "0.1"
 
 [target.wasm32-unknown-unknown.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
@@ -33,7 +33,7 @@ rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
 
 ```rust
 use bevy::prelude::*;
-use lightyear_mugon::prelude::*;
+use mugon_sdk_lightyear::prelude::*;
 
 fn main() {
     App::new()
@@ -70,7 +70,7 @@ the `bevy` template already does.
 
 ## Repository layout
 
-- `crates/lightyear_mugon/`: the transport crate.
+- `crates/mugon-sdk-lightyear/`: the transport crate.
 
 ## Building
 
