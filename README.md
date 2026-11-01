@@ -3,7 +3,7 @@
 [Lightyear](https://github.com/cBournhonesque/lightyear) networking for Bevy games that run on
 the [mugon.net](https://mugon.net) platform. The `mugon-sdk-lightyear` crate is a Lightyear transport
 on top of [`mugon-sdk-bevy`](https://github.com/mugon-net/mugon-sdk-bevy): the platform decides
-whether a process is the **server** (host) or a **client** and carries the traffic between peers,
+whether a process is the **server** (host) or a **client** and carries the traffic between players,
 and Lightyear does replication, prediction and interpolation on top.
 
 | `mugon-sdk-lightyear` | Lightyear | Bevy | `mugon-sdk-bevy` |
@@ -38,13 +38,13 @@ use mugon_sdk_lightyear::prelude::*;
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, MugonLightyearPlugin))
-        .add_systems(Update, on_peers)
+        .add_systems(Update, on_players)
         .run();
 }
 
-fn on_peers(mut connected: MessageReader<PeerConnected>) {
-    for peer in connected.read() {
-        info!("peer connected: {:?}", peer.peer_id);
+fn on_players(mut connected: MessageReader<PlayerConnected>) {
+    for player in connected.read() {
+        info!("player connected: {:?}", player.peer_id);
     }
 }
 ```
@@ -57,11 +57,11 @@ the `bevy` template already does.
 ## How it works
 
 - **Topology.** One host (the Lightyear server) and any number of clients, matching the
-  platform's model. The server gets one link per connected peer; a client has a single link to the
+  platform's model. The server gets one link per connected player; a client has a single link to the
   server.
-- **No handshake.** The platform has already vetted every peer's identity, so the transport pairs
+- **No handshake.** The platform has already vetted every player's identity, so the transport pairs
   with `lightyear_raw_connection` instead of Lightyear's connect-token flow.
-- **Peer identity.** The platform identifies peers by string ids. Lightyear wants socket
+- **Player identity.** The platform identifies players by string ids. Lightyear wants socket
   addresses, so each id is mapped to a synthetic address, assigned sequentially per session.
 - **Channel.** All traffic uses the platform's `UnreliableUnordered` channel. Lightyear brings its
   own reliability layer; stacking it on a reliable channel would only add head-of-line blocking.

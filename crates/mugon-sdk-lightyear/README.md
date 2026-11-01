@@ -5,7 +5,7 @@ the [mugon.net](https://mugon.net) platform (built on
 [`mugon-sdk-bevy`](https://crates.io/crates/mugon-sdk-bevy)).
 
 The platform decides at runtime whether a process is the **server** (host) or a **client**, and
-carries all traffic between peers. Peer identity is already vetted by the platform, so this
+carries all traffic between players. Player identity is already vetted by the platform, so this
 crate pairs the transport with `lightyear_raw_connection` (no connect-token handshake).
 
 ## Usage
@@ -17,13 +17,13 @@ use mugon_sdk_lightyear::prelude::*;
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, MugonLightyearPlugin))
-        .add_systems(Update, on_peers)
+        .add_systems(Update, on_players)
         .run();
 }
 
-fn on_peers(mut connected: MessageReader<PeerConnected>) {
-    for peer in connected.read() {
-        info!("peer connected: {:?}", peer.peer_id);
+fn on_players(mut connected: MessageReader<PlayerConnected>) {
+    for player in connected.read() {
+        info!("player connected: {:?}", player.peer_id);
     }
 }
 ```

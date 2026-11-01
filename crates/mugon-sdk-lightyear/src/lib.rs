@@ -5,16 +5,16 @@
 //! `mugon-sdk-js` — see that crate for the bridge's own design), reads this process's role
 //! (`"server"` or `"client"`, from the `MugonContext` the platform hands the game — settled at
 //! runtime, not compile time, since a single wasm build can run as either), spawns the matching
-//! topology, and surfaces peer connect/disconnect as plain Bevy events
-//! ([`PeerConnected`]/[`PeerDisconnected`]) so game code doesn't need to know anything about
+//! topology, and surfaces player connect/disconnect as plain Bevy events
+//! ([`PlayerConnected`]/[`PlayerDisconnected`]) so game code doesn't need to know anything about
 //! Lightyear's connection-lifecycle components to spawn/despawn per-player entities:
 //!
 //! - **Server**: one [`server::MugonServerEndpoint`] that fans out to one
-//!   [`lightyear_link::server::LinkOf`] child per connected client peer.
+//!   [`lightyear_link::server::LinkOf`] child per connected client player.
 //! - **Client**: one [`client::MugonClientIo`], the single [`lightyear_link::Link`] to the
-//!   platform's one server peer.
+//!   platform's one server player.
 //!
-//! Both pair with [`lightyear_raw_connection`] (Mugon already vets peer identity
+//! Both pair with [`lightyear_raw_connection`] (Mugon already vets player identity
 //! before the gameframe sees it, so no connect-token handshake is needed on top), added
 //! automatically by [`MugonLightyearPlugin`].
 //!
@@ -22,7 +22,7 @@
 //! at runtime, and a single wasm build can run as either.
 
 pub mod client;
-mod peer_addr;
+mod player_addr;
 pub mod server;
 
 use bevy_app::{App, Plugin, PreUpdate};
@@ -33,33 +33,33 @@ use lightyear::prelude::*;
 use lightyear_core::time::Instant;
 use lightyear_link::{LinkPlugin, LinkStart, Linked, Unlinked};
 
-pub use mugon_sdk_bevy::{Bridge, NetworkMode};
+pub use mugon_sdk_bevy::{Bridge, NetworkRole};
 
 pub mod prelude {
     pub use crate::client::{MugonClientIo, MugonLightyearClientPlugin};
     pub use crate::server::{MugonLightyearServerPlugin, MugonLinkOfIO, MugonServerEndpoint};
-    pub use crate::{Bridge, MugonLightyearPlugin, NetworkMode, PeerConnected, PeerDisconnected};
+    pub use crate::{Bridge, MugonLightyearPlugin, NetworkRole, PlayerConnected, PlayerDisconnected};
 }
 
-/// Fired when a peer's Lightyear connection entity gets [`Connected`].
+/// Fired when a player's Lightyear connection entity gets [`Connected`].
 ///
 /// On the server this fires once per connected client (the `LinkOf` child entity); on the
 /// client it fires once, for its single connection to the server. `peer_id` is Lightyear's own
-/// identity for the link (a [`PeerId::Raw`] wrapping the synthetic `SocketAddr` `peer_addr`
-/// assigns per platform peer id) — sufficient for `ControlledBy`/`NetworkTarget::Single` and
-/// friends; the platform's own string peer id isn't exposed outside this crate today
-/// (`peer_addr` is private), which is fine since gameplay code only needs Lightyear-level
+/// identity for the link (a [`PeerId::Raw`] wrapping the synthetic `SocketAddr` `player_addr`
+/// assigns per platform player id) — sufficient for `ControlledBy`/`NetworkTarget::Single` and
+/// friends; the platform's own string player id isn't exposed outside this crate today
+/// (`player_addr` is private), which is fine since gameplay code only needs Lightyear-level
 /// identity.
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PeerConnected {
+pub struct PlayerConnected {
     pub entity: Entity,
     pub peer_id: PeerId,
 }
 
-/// Fired when a peer's Lightyear connection entity gets [`Disconnected`]. See
-/// [`PeerConnected`] for what `peer_id` is.
+/// Fired when a player's Lightyear connection entity gets [`Disconnected`]. See
+/// [`PlayerConnected`] for what `peer_id` is.
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PeerDisconnected {
+pub struct PlayerDisconnected {
     pub entity: Entity,
     pub peer_id: PeerId,
 }
@@ -127,8 +127,8 @@ impl Plugin for MugonLightyearPlugin {
         // this unconditionally on both roles is safe -- it only prevents this crash.
         app.insert_resource(PredictionManager::default());
 
-        app.add_message::<PeerConnected>();
-        app.add_message::<PeerDisconnected>();
+        app.add_message::<PlayerConnected>();
+        app.add_message::<PlayerDisconnected>();
         app.add_observer(on_connected);
         app.add_observer(on_disconnected);
 
@@ -138,19 +138,19 @@ impl Plugin for MugonLightyearPlugin {
     }
 }
 
-/// Opts every connected link into replication and emits [`PeerConnected`].
+/// Opts every connected link into replication and emits [`PlayerConnected`].
 ///
 /// Neither `ReplicationSender` (server-side, per connected client link) nor
 /// `ReplicationReceiver` (the client's own connection entity) are inserted automatically by
 /// Lightyear's replicon backend -- a link that lacks them stays connected (messages still flow)
-/// but never replicates entities. Every Mugon game wants replication on for every peer, so this
+/// but never replicates entities. Every Mugon game wants replication on for every player, so this
 /// is handled here once rather than in each game.
 fn on_connected(
     trigger: On<Add, Connected>,
     remote_ids: Query<&RemoteId>,
     is_client_of: Query<(), With<lightyear::prelude::server::ClientOf>>,
     is_client: Query<(), With<Client>>,
-    mut events: MessageWriter<PeerConnected>,
+    mut events: MessageWriter<PlayerConnected>,
     mut commands: Commands,
 ) {
     if is_client_of.get(trigger.entity).is_ok() {
@@ -160,7 +160,7 @@ fn on_connected(
         commands.entity(trigger.entity).insert(ReplicationReceiver);
     }
     if let Ok(remote_id) = remote_ids.get(trigger.entity) {
-        events.write(PeerConnected {
+        events.write(PlayerConnected {
             entity: trigger.entity,
             peer_id: remote_id.0,
         });
@@ -170,10 +170,10 @@ fn on_connected(
 fn on_disconnected(
     trigger: On<Add, Disconnected>,
     remote_ids: Query<&RemoteId>,
-    mut events: MessageWriter<PeerDisconnected>,
+    mut events: MessageWriter<PlayerDisconnected>,
 ) {
     if let Ok(remote_id) = remote_ids.get(trigger.entity) {
-        events.write(PeerDisconnected {
+        events.write(PlayerDisconnected {
             entity: trigger.entity,
             peer_id: remote_id.0,
         });
@@ -185,7 +185,7 @@ fn on_disconnected(
 ///
 /// This is a deliberate safety net, not something verified to be *necessary*: every other
 /// Lightyear transport crate (`lightyear_crossbeam`, `lightyear_udp`, ...) leaves despawning a
-/// disconnected peer entirely to `lightyear_connection`'s own reaction to `Unlinked`/
+/// disconnected player entirely to `lightyear_connection`'s own reaction to `Unlinked`/
 /// `Disconnected`, and this crate couldn't confirm end-to-end (no running example) that that
 /// reaction actually despawns things here too. The grace period exists so this safety net can
 /// never race that normal cleanup — see `mark_stale_on_unlinked`/`despawn_stale_links`.
@@ -218,8 +218,8 @@ fn mark_stale_on_unlinked(
 
 /// Despawns any [`StaleLink`] entity whose grace period has elapsed.
 ///
-/// If the entity got re-`Linked` before then (e.g. the same Mugon peer reconnecting quickly —
-/// recall peer ids are never reused for a *different* peer, so a fresh
+/// If the entity got re-`Linked` before then (e.g. the same Mugon player reconnecting quickly —
+/// recall player ids are never reused for a *different* player, so a fresh
 /// `Linked` on this exact entity within the grace period is a legitimate fast reconnect, not a
 /// stale leftover), the [`StaleLink`] marker is simply removed instead.
 fn despawn_stale_links(
@@ -240,7 +240,7 @@ fn despawn_stale_links(
 
 /// Spawns the topology matching this process's role exactly once, on the first frame.
 ///
-/// Spawning automatically, rather than making the app read [`Bridge::network_mode`] itself and
+/// Spawning automatically, rather than making the app read [`Bridge::network_role`] itself and
 /// spawn manually, keeps the role-dependent setup out of the game. An app that wants to control
 /// the topology itself can read the role from the bridge instead.
 fn auto_spawn_role(
@@ -251,14 +251,14 @@ fn auto_spawn_role(
     if *spawned {
         return;
     }
-    match bridge.network_mode() {
-        NetworkMode::Server => {
+    match bridge.network_role() {
+        NetworkRole::Server => {
             let entity = commands.spawn(server::MugonServerEndpoint::new()).id();
             commands.trigger(LinkStart { entity });
         }
-        NetworkMode::Client => {
+        NetworkRole::Client => {
             let entity = commands
-                .spawn(client::MugonClientIo::new(bridge.server_id()))
+                .spawn(client::MugonClientIo::new(bridge.server_player().id.clone()))
                 .id();
             commands.trigger(LinkStart { entity });
         }

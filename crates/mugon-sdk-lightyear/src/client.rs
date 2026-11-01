@@ -1,5 +1,5 @@
 //! Client side of the Mugon transport: exactly one [`Link`], to the platform's single server
-//! peer named at construction time.
+//! player named at construction time.
 
 use aeronet_io::connection::LocalAddr;
 use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
@@ -13,28 +13,28 @@ use lightyear_link::{
 use lightyear_raw_connection::client::RawClient;
 use mugon_sdk_bevy::{Bridge, Channel};
 
-/// A single link entity always uses this synthetic address for its one peer (the server).
-/// Safe to hardcode (rather than going through `PeerAddrTable`, which the server side needs to
-/// disambiguate *many* peers): a client entity has exactly one peer for its whole lifetime, and
+/// A single link entity always uses this synthetic address for its one player (the server).
+/// Safe to hardcode (rather than going through `PlayerAddrTable`, which the server side needs to
+/// disambiguate *many* players): a client entity has exactly one player for its whole lifetime, and
 /// a fresh entity is spawned per (re)connection, so there's no cross-entity collision to avoid.
 const SERVER_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1);
 
 /// Client-side Mugon transport component.
 ///
 /// Requires [`RawClient`]: `Linked` on this entity implies `Connected` with no
-/// separate handshake, since Mugon already vetted this peer before the gameframe saw it.
+/// separate handshake, since Mugon already vetted this player before the gameframe saw it.
 #[derive(Component)]
 #[require(Link, RawClient = RawClient)]
 pub struct MugonClientIo {
-    server_id: String,
+    server_player_id: String,
 }
 
 impl MugonClientIo {
-    /// `server_id` is the platform-assigned id of the (single) server peer, i.e.
-    /// `Bridge::server_id()`.
-    pub fn new(server_id: impl Into<String>) -> Self {
+    /// `server_player_id` is the platform-assigned id of the (single) server player, i.e.
+    /// `Bridge::server_player().id`.
+    pub fn new(server_player_id: impl Into<String>) -> Self {
         Self {
-            server_id: server_id.into(),
+            server_player_id: server_player_id.into(),
         }
     }
 }
@@ -56,7 +56,7 @@ impl Plugin for MugonLightyearClientPlugin {
 }
 
 /// Marks the client entity `Linking` (attempting to connect). The platform only hands the game
-/// its context once the network is up, and a client's `ctx.initialPeers` always contains its server
+/// its context once the network is up, and a client's `ctx.initialPlayers` always contains its server
 /// (`mugon-sdk-js`'s `Parentframe` guarantees it), so `complete_link` can finish the
 /// transition to `Linked` on the next frame without waiting for anything.
 fn link(trigger: On<LinkStart>, query: Query<(), With<MugonClientIo>>, mut commands: Commands) {
@@ -75,7 +75,7 @@ type LinkingMugonClient = (With<MugonClientIo>, With<Linking>, Without<Linked>);
 /// `LocalId` and only ever defaults `RemoteId` to the generic `PeerId::Server` — it never reads
 /// `PeerAddr` at all. Inserting `PeerAddr` here (matching `server.rs`'s pattern, which *is*
 /// read by the server-side observer) left the query's `&LocalAddr` unsatisfied, so `Connected`
-/// was never added and `PeerConnected` never fired for the client.
+/// was never added and `PlayerConnected` never fired for the client.
 fn complete_link(
     query: Query<Entity, LinkingMugonClient>,
     mut commands: Commands,
@@ -87,7 +87,7 @@ fn complete_link(
     }
 }
 
-/// Calls `window.disconnect` for the server peer whenever *this side* unlinks for a reason
+/// Calls `window.disconnect` for the server player whenever *this side* unlinks for a reason
 /// other than the platform already having reported the server's own disconnect (see the
 /// matching comment in `server.rs`).
 fn disconnect_server_on_local_unlink(
@@ -99,19 +99,19 @@ fn disconnect_server_on_local_unlink(
         return;
     }
     if let Ok(client) = query.get(trigger.entity) {
-        bridge.disconnect(&client.server_id);
+        bridge.disconnect_player(&client.server_player_id);
     }
 }
 
-/// Unlinks if the platform reports the server peer disconnected.
+/// Unlinks if the platform reports the server player disconnected.
 fn poll_disconnect(
     bridge: bevy_ecs::system::NonSend<Bridge>,
     query: Query<(Entity, &MugonClientIo)>,
     mut commands: Commands,
 ) {
-    while let Some(peer_id) = bridge.pop_disconnect() {
+    while let Some(player_id) = bridge.pop_disconnect() {
         for (entity, client) in query.iter() {
-            if client.server_id == peer_id {
+            if client.server_player_id == player_id {
                 commands.trigger(Unlink {
                     entity,
                     reason: UnlinkReason::ByPeer("server disconnected".into()),
@@ -129,7 +129,7 @@ fn receive(
         return;
     };
     while let Some((from, data)) = bridge.pop_recv() {
-        if from == client.server_id {
+        if from == client.server_player_id {
             link.recv
                 .push(recv_payload_from_bytes(data), Instant::now());
         }
@@ -145,7 +145,7 @@ fn send(
     };
     for payload in link.send.drain() {
         bridge.send(
-            &client.server_id,
+            &client.server_player_id,
             payload.as_ref(),
             Channel::UnreliableUnordered,
         );

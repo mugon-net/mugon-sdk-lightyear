@@ -1,7 +1,7 @@
 //! Server (host) side of the Mugon transport: one [`MugonServerEndpoint`] fanning out to one
-//! [`LinkOf`] child per connected client peer, mirroring `lightyear_udp`'s `UdpEndpoint`.
+//! [`LinkOf`] child per connected client player, mirroring `lightyear_udp`'s `UdpEndpoint`.
 
-use crate::peer_addr::PeerAddrTable;
+use crate::player_addr::PlayerAddrTable;
 use aeronet_io::connection::PeerAddr;
 use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
@@ -12,7 +12,7 @@ use lightyear_link::{
     UnlinkReason,
 };
 use lightyear_raw_connection::server::RawServer;
-use mugon_sdk_bevy::{Bridge, Channel};
+use mugon_sdk_bevy::{Bridge, Channel, Player};
 use std::collections::HashMap;
 use tracing::debug;
 
@@ -26,13 +26,13 @@ use tracing::debug;
 /// Note: `lightyear_link` 0.30.1 (the published version this crate depends on)
 /// names this relationship-target component `Server`, with child links pointing back via
 /// `LinkOf { server: Entity }`. Unreleased upstream `main` has since renamed this to
-/// `Endpoint`/`LinkOf { endpoint: Entity }` (transport-neutral naming, since a P2P peer can also
+/// `Endpoint`/`LinkOf { endpoint: Entity }` (transport-neutral naming, since a P2P player can also
 /// own child links without being a "server"). This crate's naming follows once that lands in a
 /// release.
 #[derive(Component, Default)]
 #[require(Server, RawServer = RawServer)]
 pub struct MugonServerEndpoint {
-    addrs: PeerAddrTable,
+    addrs: PlayerAddrTable,
     entities: HashMap<String, Entity>,
 }
 
@@ -55,10 +55,10 @@ impl Plugin for MugonLightyearServerPlugin {
             app.add_plugins(ServerLinkPlugin);
         }
         app.add_observer(link);
-        app.add_observer(disconnect_peer_on_local_unlink);
+        app.add_observer(disconnect_player_on_local_unlink);
         app.add_systems(
             PreUpdate,
-            (spawn_and_despawn_peers, receive)
+            (spawn_and_despawn_players, receive)
                 .chain()
                 .in_set(LinkReceiveSystems::BufferToLink),
         );
@@ -76,16 +76,16 @@ fn link(
     }
 }
 
-/// Spawns a [`LinkOf`] child for each newly-connected peer and unlinks the child for each
+/// Spawns a [`LinkOf`] child for each newly-connected player and unlinks the child for each
 /// disconnected one.
 ///
 /// Assumes exactly one [`MugonServerEndpoint`] per process, matching Mugon's star topology
 /// (one host, many clients).
 ///
-/// A repeated `"con"` for a peer id we already have an entity for is treated as idempotent
+/// A repeated `"player-connected"` for a player id we already have an entity for is treated as idempotent
 /// (existing entity is simply marked `Linked` again), not a duplicate spawn — this crate
-/// doesn't assume the platform never re-announces a still-connected peer.
-fn spawn_and_despawn_peers(
+/// doesn't assume the platform never re-announces a still-connected player.
+fn spawn_and_despawn_players(
     bridge: bevy_ecs::system::NonSend<Bridge>,
     mut endpoints: Query<(Entity, &mut MugonServerEndpoint), With<Linked>>,
     mut commands: Commands,
@@ -94,13 +94,13 @@ fn spawn_and_despawn_peers(
         return;
     };
 
-    while let Some(peer_id) = bridge.pop_connect() {
-        if let Some(&entity) = endpoint.entities.get(&peer_id) {
-            debug!(%peer_id, "duplicate Mugon \"con\" for an already-tracked peer; re-linking");
+    while let Some(Player { id: player_id, .. }) = bridge.pop_connect() {
+        if let Some(&entity) = endpoint.entities.get(&player_id) {
+            debug!(%player_id, "duplicate Mugon \"player-connected\" for an already-tracked player; re-linking");
             commands.entity(entity).insert(Linked);
             continue;
         }
-        let addr = endpoint.addrs.assign(&peer_id);
+        let addr = endpoint.addrs.assign(&player_id);
         let entity = commands
             .spawn((
                 LinkOf {
@@ -112,26 +112,26 @@ fn spawn_and_despawn_peers(
                 MugonLinkOfIO,
             ))
             .id();
-        endpoint.entities.insert(peer_id, entity);
+        endpoint.entities.insert(player_id, entity);
     }
 
-    while let Some(peer_id) = bridge.pop_disconnect() {
-        endpoint.addrs.remove_by_id(&peer_id);
-        if let Some(entity) = endpoint.entities.remove(&peer_id) {
+    while let Some(player_id) = bridge.pop_disconnect() {
+        endpoint.addrs.remove_by_id(&player_id);
+        if let Some(entity) = endpoint.entities.remove(&player_id) {
             commands.trigger(Unlink {
                 entity,
-                reason: UnlinkReason::ByPeer("peer disconnected".into()),
+                reason: UnlinkReason::ByPeer("player disconnected".into()),
             });
         }
     }
 }
 
-/// Calls `window.disconnect` for a peer whenever *this side* unlinks the connection for a
-/// reason other than the peer already having reported its own disconnect (`UnlinkReason::
-/// ByPeer`, which `spawn_and_despawn_peers` sets from Mugon's `"dc"` event) — e.g. the
+/// Calls `window.disconnect` for a player whenever *this side* unlinks the connection for a
+/// reason other than the player already having reported its own disconnect (`UnlinkReason::
+/// ByPeer`, which `spawn_and_despawn_players` sets from Mugon's `"player-disconnected"` event) — e.g. the
 /// connection layer or the app closing the link locally. Avoids redundantly telling the
-/// platform to drop a peer that already told us it's gone.
-fn disconnect_peer_on_local_unlink(
+/// platform to drop a player that already told us it's gone.
+fn disconnect_player_on_local_unlink(
     trigger: On<Unlink>,
     bridge: bevy_ecs::system::NonSend<Bridge>,
     links: Query<&PeerAddr, With<MugonLinkOfIO>>,
@@ -146,8 +146,8 @@ fn disconnect_peer_on_local_unlink(
     let Ok(addr) = links.get(trigger.entity) else {
         return;
     };
-    if let Some(peer_id) = endpoint.addrs.peer_id(addr.0) {
-        bridge.disconnect(peer_id);
+    if let Some(player_id) = endpoint.addrs.player_id(addr.0) {
+        bridge.disconnect_player(player_id);
     }
 }
 
@@ -161,7 +161,7 @@ fn receive(
     };
     while let Some((from, data)) = bridge.pop_recv() {
         let Some(&entity) = endpoint.entities.get(&from) else {
-            debug!(from_peer = %from, "data from an unknown Mugon peer; dropping");
+            debug!(from_player = %from, "data from an unknown Mugon player; dropping");
             continue;
         };
         if let Ok(mut link) = links.get_mut(entity) {
@@ -180,11 +180,11 @@ fn send(
         return;
     };
     for (mut link, addr) in links.iter_mut() {
-        let Some(peer_id) = endpoint.addrs.peer_id(addr.0) else {
+        let Some(player_id) = endpoint.addrs.player_id(addr.0) else {
             continue;
         };
         for payload in link.send.drain() {
-            bridge.send(peer_id, payload.as_ref(), Channel::UnreliableUnordered);
+            bridge.send(player_id, payload.as_ref(), Channel::UnreliableUnordered);
         }
     }
 }
