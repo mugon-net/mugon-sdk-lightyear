@@ -23,7 +23,7 @@ lightyear_connection = "0.30.1"
 lightyear_core = "0.30.1"
 lightyear_link = "0.30.1"
 lightyear_raw_connection = { version = "0.30.1", features = ["client", "server"] }
-mugon-sdk-bevy = { path = "../../../mugon-sdk-bevy", version = "0.3.0" }
+mugon-sdk-bevy = { path = "../../../mugon-sdk-bevy", version = "0.4.0" }
 tracing = "0.1.44"
 
 [target.wasm32-unknown-unknown.dependencies]
