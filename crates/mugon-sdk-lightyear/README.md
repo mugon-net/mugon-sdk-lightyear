@@ -33,6 +33,10 @@ plugin groups, and this crate's transport, and spawns the topology matching the 
 role on the first frame. The wasm has to be started from inside the callback of `Mugon.start`
 (see `mugon-sdk-bevy`).
 
+On the server, each client's link entity carries a `MugonPlayer`, the platform player (`id` and
+display `name`) behind it. Query it with the `entity` of a `PlayerConnected` event to learn who
+joined; the server's own player is `Bridge::self_player()`.
+
 All traffic uses the platform's `UnreliableUnordered` channel: Lightyear brings its own
 reliability layer, so layering it over a reliable channel would only add head-of-line blocking.
 

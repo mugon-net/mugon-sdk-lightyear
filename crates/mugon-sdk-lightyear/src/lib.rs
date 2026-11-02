@@ -33,12 +33,17 @@ use lightyear::prelude::*;
 use lightyear_core::time::Instant;
 use lightyear_link::{LinkPlugin, LinkStart, Linked, Unlinked};
 
-pub use mugon_sdk_bevy::{Bridge, NetworkRole};
+pub use mugon_sdk_bevy::{Bridge, NetworkRole, Player};
+pub use server::MugonPlayer;
 
 pub mod prelude {
     pub use crate::client::{MugonClientIo, MugonLightyearClientPlugin};
-    pub use crate::server::{MugonLightyearServerPlugin, MugonLinkOfIO, MugonServerEndpoint};
-    pub use crate::{Bridge, MugonLightyearPlugin, NetworkRole, PlayerConnected, PlayerDisconnected};
+    pub use crate::server::{
+        MugonLightyearServerPlugin, MugonLinkOfIO, MugonPlayer, MugonServerEndpoint,
+    };
+    pub use crate::{
+        Bridge, MugonLightyearPlugin, NetworkRole, Player, PlayerConnected, PlayerDisconnected,
+    };
 }
 
 /// Fired when a player's Lightyear connection entity gets [`Connected`].

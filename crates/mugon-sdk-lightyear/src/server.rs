@@ -47,6 +47,12 @@ impl MugonServerEndpoint {
 #[derive(Component)]
 pub struct MugonLinkOfIO;
 
+/// The platform player behind a [`MugonLinkOfIO`] link entity, with the display name the
+/// platform gave it. Read it from the entity of a [`PlayerConnected`](crate::PlayerConnected)
+/// event to learn who just joined.
+#[derive(Component, Clone, Debug)]
+pub struct MugonPlayer(pub Player);
+
 pub struct MugonLightyearServerPlugin;
 
 impl Plugin for MugonLightyearServerPlugin {
@@ -94,7 +100,8 @@ fn spawn_and_despawn_players(
         return;
     };
 
-    while let Some(Player { id: player_id, .. }) = bridge.pop_connect() {
+    while let Some(player) = bridge.pop_connect() {
+        let player_id = player.id.clone();
         if let Some(&entity) = endpoint.entities.get(&player_id) {
             debug!(%player_id, "duplicate Mugon \"player-connected\" for an already-tracked player; re-linking");
             commands.entity(entity).insert(Linked);
@@ -110,6 +117,7 @@ fn spawn_and_despawn_players(
                 Linked,
                 PeerAddr(addr),
                 MugonLinkOfIO,
+                MugonPlayer(player),
             ))
             .id();
         endpoint.entities.insert(player_id, entity);
