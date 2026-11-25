@@ -78,7 +78,7 @@ pub struct PlayerDisconnected {
 /// this process turns out to have) because Mugon decides the role at runtime, not at compile
 /// time — see the module docs. This costs a little unused code in the other role's binary.
 ///
-/// If the app also needs `mugon_sdk_bevy::MugonPlugin` directly (e.g. for `touch-controls`),
+/// If the app also needs `mugon_sdk_bevy::MugonPlugin` directly (e.g. for `fullscreen`),
 /// add it *before* this plugin, or not at all — adding it afterwards panics (duplicate plugin).
 pub struct MugonLightyearPlugin;
 
@@ -151,7 +151,7 @@ impl Plugin for MugonLightyearPlugin {
 /// but never replicates entities. Every Mugon game wants replication on for every player, so this
 /// is handled here once rather than in each game.
 fn on_connected(
-    trigger: On<Add, Connected>,
+    trigger: On<Add<Connected>>,
     remote_ids: Query<&RemoteId>,
     is_client_of: Query<(), With<lightyear::prelude::server::ClientOf>>,
     is_client: Query<(), With<Client>>,
@@ -173,7 +173,7 @@ fn on_connected(
 }
 
 fn on_disconnected(
-    trigger: On<Add, Disconnected>,
+    trigger: On<Add<Disconnected>>,
     remote_ids: Query<&RemoteId>,
     mut events: MessageWriter<PlayerDisconnected>,
 ) {
@@ -210,7 +210,7 @@ type MugonOwnedLinkNotYetStale = (
 
 /// Starts the grace period for any Mugon-owned link entity that just went `Unlinked`.
 fn mark_stale_on_unlinked(
-    trigger: On<Add, Unlinked>,
+    trigger: On<Add<Unlinked>>,
     query: Query<Entity, MugonOwnedLinkNotYetStale>,
     mut commands: Commands,
 ) {

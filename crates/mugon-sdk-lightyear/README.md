@@ -44,7 +44,7 @@ reliability layer, so layering it over a reliable channel would only add head-of
 
 | `mugon-sdk-lightyear` | Lightyear | Bevy | `mugon-sdk-bevy` |
 | --- | --- | --- | --- |
-| 0.1 | 0.30 | 0.19 | 0.1 |
+| 0.1 | 0.31 | 0.20 | 0.1 |
 
 Target: `wasm32-unknown-unknown`.
 

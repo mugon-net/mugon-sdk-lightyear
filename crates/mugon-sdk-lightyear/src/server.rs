@@ -6,7 +6,8 @@ use aeronet_io::connection::PeerAddr;
 use bevy_app::{App, Plugin, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
 use lightyear_core::time::Instant;
-use lightyear_link::server::{LinkOf, Server, ServerLinkPlugin};
+use lightyear_link::endpoint::{EndpointLinkPlugin, LinkOf};
+use lightyear_link::server::Server;
 use lightyear_link::{
     recv_payload_from_bytes, Link, LinkReceiveSystems, LinkStart, LinkSystems, Linked, Unlink,
     UnlinkReason,
@@ -22,13 +23,6 @@ use tracing::debug;
 ///
 /// Requires [`RawServer`]: a `LinkOf` child reaching `Linked` implies `Connected`
 /// with no separate handshake.
-///
-/// Note: `lightyear_link` 0.30.1 (the published version this crate depends on)
-/// names this relationship-target component `Server`, with child links pointing back via
-/// `LinkOf { server: Entity }`. Unreleased upstream `main` has since renamed this to
-/// `Endpoint`/`LinkOf { endpoint: Entity }` (transport-neutral naming, since a P2P player can also
-/// own child links without being a "server"). This crate's naming follows once that lands in a
-/// release.
 #[derive(Component, Default)]
 #[require(Server, RawServer = RawServer)]
 pub struct MugonServerEndpoint {
@@ -57,8 +51,8 @@ pub struct MugonLightyearServerPlugin;
 
 impl Plugin for MugonLightyearServerPlugin {
     fn build(&self, app: &mut App) {
-        if !app.is_plugin_added::<ServerLinkPlugin>() {
-            app.add_plugins(ServerLinkPlugin);
+        if !app.is_plugin_added::<EndpointLinkPlugin>() {
+            app.add_plugins(EndpointLinkPlugin);
         }
         app.add_observer(link);
         app.add_observer(disconnect_player_on_local_unlink);
@@ -111,7 +105,7 @@ fn spawn_and_despawn_players(
         let entity = commands
             .spawn((
                 LinkOf {
-                    server: endpoint_entity,
+                    endpoint: endpoint_entity,
                 },
                 Link::default(),
                 Linked,

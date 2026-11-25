@@ -8,7 +8,7 @@ and Lightyear does replication, prediction and interpolation on top.
 
 | `mugon-sdk-lightyear` | Lightyear | Bevy | `mugon-sdk-bevy` |
 | --- | --- | --- | --- |
-| 0.1 | 0.30 | 0.19 | 0.1 |
+| 0.1 | 0.31 | 0.20 | 0.1 |
 
 ## Getting started
 
@@ -17,8 +17,8 @@ for `mugon-sdk-bevy`; add this crate to it:
 
 ```toml
 [dependencies]
-bevy = "0.19"
-lightyear = "0.30"
+bevy = "0.20"
+lightyear = "0.31"
 mugon-sdk-lightyear = "0.1"
 
 [target.wasm32-unknown-unknown.dependencies]

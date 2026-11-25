@@ -15,14 +15,14 @@ repository.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-aeronet_io = "0.21.0"
-bevy_app = "0.19.1"
-bevy_ecs = "0.19.1"
-lightyear = "0.30.1"
-lightyear_connection = "0.30.1"
-lightyear_core = "0.30.1"
-lightyear_link = "0.30.1"
-lightyear_raw_connection = { version = "0.30.1", features = ["client", "server"] }
+aeronet_io = "0.22.0"
+bevy_app = "0.20.1"
+bevy_ecs = "0.20.1"
+lightyear = "0.31.0"
+lightyear_connection = "0.31.0"
+lightyear_core = "0.31.0"
+lightyear_link = "0.31.0"
+lightyear_raw_connection = { version = "0.31.0", features = ["client", "server"] }
 mugon-sdk-bevy = { path = "../../../mugon-sdk-bevy", version = "0.4.0" }
 tracing = "0.1.44"
 
